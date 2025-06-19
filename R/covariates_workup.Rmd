@@ -1,0 +1,107 @@
+---
+title: "PA Well Water Covariates"
+author: "Scott Pease"
+date: "2025-06-18"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(readr)
+library(dplyr)
+```
+
+```{r}
+all_data = readr::read_csv("/Users/Scott/QGIS/SVI/Penn_Analysis/data/final_output.csv")
+```
+
+```{r}
+spec(all_data)
+```
+
+```{r}
+covars = all_data |> 
+  select(
+    EP_POV150, 
+    EP_UNEMP,
+    EP_NOHSDP,
+    EP_AGE65,
+    EP_AGE17,
+    EP_MINRTY,
+    EP_HBURD
+  )
+```
+
+Set NA's (are -999)
+ref: https://stackoverflow.com/questions/19503266/replace-all-particular-values-in-a-data-frame
+```{r}
+covars[covars==-999] <- NA
+```
+
+
+```{r}
+for (nom in colnames(covars)) {
+  hist(covars[[nom]], breaks = 20)
+}
+```
+
+```{r}
+summary(covars)
+```
+
+Want to bin as <= (lte): c.f. 26.4
+ergo want to bin by > (gt)
+POV150 has 0 and 100 values...
+so if I do max(1,sum(val > quantile(.)))... 0 will go to 1st quantile, and
+100 will stay in 4th quantile.
+```{r}
+x = "EP_POV150"
+quantile(covars[x], na.rm = TRUE)
+```
+
+```{r}
+qs = quantile(covars[nom], na.rm = TRUE)
+covars2 = covars |>
+  rowwise() |> 
+  mutate("{nom}_quartile" := if_else(.data[[nom]] == qs[1], 1, sum(.data[[nom]] > qs))) |> 
+  ungroup()
+# covars2$asdf = roww sum(covars[[x]] > qs)
+```
+
+```{r}
+covars2
+```
+
+
+An explanation
+ `sum(!is.na(.data[[nom]]))` gets you the number of non-na values in your column. This will serve as a denominator.
+ `ntile()` doesn't handle ties like I want
+    # mutate("{nom}_quartile" := ntile(.data[[nom]], 4))
+ 
+```{r}
+for (nom in colnames(covars)) {
+  qs = quantile(covars[nom], na.rm = TRUE)
+  covars = covars |>
+    rowwise() |> 
+    mutate("{nom}_quartile" := if_else(.data[[nom]] == qs[1], 1, sum(.data[[nom]] > qs))) |> 
+    ungroup()
+}
+```
+
+```{r}
+covnames = c(
+    "EP_POV150", 
+    "EP_UNEMP",
+    "EP_NOHSDP",
+    "EP_AGE65",
+    "EP_AGE17",
+    "EP_MINRTY",
+    "EP_HBURD"
+)
+all_data |> 
+  select(all_of(covnames))
+```
+

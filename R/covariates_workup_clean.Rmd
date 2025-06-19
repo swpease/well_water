@@ -1,0 +1,49 @@
+---
+title: "PA Well Water Covariates"
+author: "Scott Pease"
+date: "2025-06-18"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(readr)
+library(dplyr)
+```
+
+```{r}
+all_data = readr::read_csv("/Users/Scott/QGIS/SVI/Penn_Analysis/data/final_output.csv")
+```
+
+```{r}
+covnames = c(
+    "EP_POV150", 
+    "EP_UNEMP",
+    "EP_NOHSDP",
+    "EP_AGE65",
+    "EP_AGE17",
+    "EP_MINRTY",
+    "EP_HBURD"
+)
+covars = all_data |> select(all_of(covnames))
+```
+
+Set NA's (are -999)
+ref: https://stackoverflow.com/questions/19503266/replace-all-particular-values-in-a-data-frame
+```{r}
+covars[covars==-999] <- NA
+```
+
+Convert to quartiles
+```{r}
+for (nom in colnames(covars)) {
+  qs = quantile(covars[nom], na.rm = TRUE)
+  covars = covars |>
+    rowwise() |> 
+    mutate("{nom}_quartile" := if_else(.data[[nom]] == qs[1], 1, sum(.data[[nom]] > qs))) |> 
+    ungroup()
+}
+```
