@@ -1,0 +1,65 @@
+---
+title: "Rurality"
+author: "Scott Pease"
+date: "2025-06-19"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+library(readr)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+```
+
+```{r}
+all_data = readr::read_csv("/Users/Scott/QGIS/SVI/Penn_Analysis/data/final_output.csv")
+```
+
+remove that Lake Erie (the literal lake) tract:
+```{r}
+all_data <- all_data |> filter(!is.na(COUNTY))
+```
+
+remove empty (Zero pop) tracts
+```{r}
+all_data <- all_data |> filter(TL_sum_pop_est > 0)
+```
+
+
+```{r}
+all_data = all_data |> 
+  mutate(
+    WWR_sum_pop_est = tidyr::replace_na(WWR_sum_pop_est, 0),
+    frac_WW_CEISIN = WWR_sum_pop_est / TL_sum_pop_est
+  )
+```
+
+```{r}
+all_data = all_data |> 
+  mutate(
+    WW_pop_OUTCOME = E_TOTPOP * frac_WW_CEISIN
+  )
+```
+
+so use Neg Binomial
+```{r}
+all_data |> 
+  summarise(mean = mean(WW_pop_OUTCOME), var = var(WW_pop_OUTCOME))
+```
+
+Is it zero inflated?
+```{r}
+quantile(all_data$WW_pop_OUTCOME, seq(0, 1, 0.1), na.rm = TRUE)
+```
+
+```{r}
+all_data |> ggplot() +
+  geom_histogram(aes(WW_pop_OUTCOME))
+```
+

@@ -1,0 +1,43 @@
+---
+title: "Rurality"
+author: "Scott Pease"
+date: "2025-06-19"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+library(readr)
+library(dplyr)
+```
+
+```{r}
+all_data = readr::read_csv("/Users/Scott/QGIS/SVI/Penn_Analysis/data/final_output.csv")
+```
+
+remove that Lake Erie (the literal lake) tract:
+```{r}
+all_data <- all_data |> filter(!is.na(COUNTY))
+```
+
+
+Should pop density be based on land area only, or total area (i.e. including water area as well)?
+```{r}
+all_data = all_data |> 
+  mutate(
+    pop_density = E_TOTPOP / ALAND,
+    pop_density_alt = E_TOTPOP / (ALAND + AWATER),
+    )
+```
+
+An alternative rurality estimate is the binary classification provided by the Center for Rural PA: https://www.rural.pa.gov/download.cfm?file=Resources/PDFs/data/List%20of%20Counties%20web%202022.xlsx
+
+
+```{r}
+
+```
+

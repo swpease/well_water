@@ -1,0 +1,94 @@
+---
+title: "BPR_CAR"
+author: "Scott Pease"
+date: "2025-06-20"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(readr)
+library(dplyr)
+library(tidyr)
+library(PReMiuM)
+library(sf)
+library(spdep)
+```
+
+# SVI Data
+Need to figure out which cols to remove from the neighbors matrix stuff 
+with {spdep}
+## Load Data
+```{r}
+all_data = readr::read_csv(
+  "/Users/Scott/QGIS/SVI/Penn_Analysis/data/final_output.csv",
+  col_types = list(
+    GEOID = col_character()
+  ))
+```
+
+# Remove Wonky Rows
+remove that Lake Erie (the literal lake) tract:
+```{r}
+all_data <- all_data |> filter(!is.na(COUNTY))
+```
+
+## remove empty (Zero pop) tracts
+Removing TL_sum_pop_est zeroes gets rid of NAs in the outcome
+Removing E_TOTPOP zeroes: the covariates are NA for these rows
+b/c ACS says nobody's there:
+`x = all_data |> 
+  filter(E_TOTPOP == 0) |> 
+  select(all_of(covnames)
+`
+SO I'll remove BOTH.
+```{r}
+all_data <- all_data |> filter(E_TOTPOP > 0)
+all_data <- all_data |> filter(TL_sum_pop_est > 0)
+```
+
+## VERY IMPORTANT
+THIS LINES UP WITH THE INLA FILE, PROVIDED THAT IS ALSO SORTED BY GEOID
+```{r}
+all_data <- all_data |> arrange(GEOID)
+```
+
+
+# TIGER/Line
+```{r}
+TL_data = st_read("/Users/Scott/QGIS/SVI/Penn_Analysis/data/tl_2022_42_tract/tl_2022_42_tract.shp")
+```
+
+```{r}
+class(TL_data)
+```
+
+```{r}
+non_zero_pop_tracts = all_data$GEOID
+TL_data = TL_data |> 
+  filter(GEOID %in% non_zero_pop_tracts) |> 
+  arrange(GEOID)
+```
+
+
+# Neighbors Stuff
+```{r}
+TL_nb = poly2nb(TL_data, row.names = TL_data$GEOID)
+```
+
+```{r}
+coords <- st_coordinates(st_centroid(st_geometry(TL_data)))
+```
+
+
+```{r}
+plot(st_geometry(TL_data))
+plot(TL_nb, coords, add=TRUE, col="red")
+```
+
+```{r}
+nb2INLA("INLA_file", TL_nb)
+```

@@ -1,0 +1,51 @@
+---
+title: "Neighbors"
+author: "Scott Pease"
+date: "2025-06-19"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(sf)
+library(spdep)
+```
+
+```{r}
+TL_data = st_read("/Users/Scott/QGIS/SVI/Penn_Analysis/data/tl_2022_42_tract/tl_2022_42_tract.shp")
+```
+
+```{r}
+head(TL_data)
+```
+
+Do I want queen boundaries? Is default.
+```{r}
+TL_nb = poly2nb(TL_data, row.names = TL_data$GEOID)
+```
+
+```{r}
+coords <- st_coordinates(st_centroid(st_geometry(TL_data)))
+```
+
+
+```{r}
+plot(st_geometry(TL_data))
+plot(TL_nb, coords, add=TRUE, col="red")
+```
+
+```{r}
+attributes(TL_nb)
+```
+
+```{r}
+cardinalities = card(TL_nb)
+```
+
+```{r}
+nb2INLA("INLA_file", TL_nb)
+```
+

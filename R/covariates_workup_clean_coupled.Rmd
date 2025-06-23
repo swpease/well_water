@@ -1,0 +1,71 @@
+---
+title: "PA Well Water Covariates"
+author: "Scott Pease"
+date: "2025-06-18"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(readr)
+library(dplyr)
+```
+
+```{r}
+all_data = readr::read_csv("/Users/Scott/QGIS/SVI/Penn_Analysis/data/final_output.csv")
+```
+
+```{r}
+covnames = c(
+    "EP_POV150", 
+    "EP_UNEMP",
+    "EP_NOHSDP",
+    "EP_AGE65",
+    "EP_AGE17",
+    "EP_MINRTY",
+    "EP_HBURD"
+)
+```
+
+```{r}
+d2 = all_data |> 
+  mutate(
+    across(
+      all_of(covnames),
+      ~ if_else(.x == -999, NA, .x)
+    )
+  )
+```
+
+```{r}
+purrr::as_mapper(~ if_else(.x == -999, NA, .x))
+```
+
+```{r}
+a = d2 |> select(EP_UNEMP)
+b = all_data|> select(EP_UNEMP)
+c = data.frame(a, b, a==b)
+sum(c$EP_UNEMP == c$EP_UNEMP.1, na.rm = TRUE)
+sum(!is.na(a))
+```
+
+
+Set NA's (are -999)
+ref: https://stackoverflow.com/questions/19503266/replace-all-particular-values-in-a-data-frame
+```{r}
+all_data[all_data==-999] <- NA
+```
+
+Convert to quartiles
+```{r}
+for (nom in covnames) {
+  qs = quantile(all_data[nom], na.rm = TRUE)
+  all_data = all_data |>
+    rowwise() |> 
+    mutate("{nom}_quartile" := if_else(.data[[nom]] == qs[1], 1, sum(.data[[nom]] > qs))) |> 
+    ungroup()
+}
+```
