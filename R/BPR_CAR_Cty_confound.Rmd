@@ -1,0 +1,215 @@
+---
+title: "BPR_CAR"
+author: "Scott Pease"
+date: "2025-06-20"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(readr)
+library(dplyr)
+library(tidyr)
+library(PReMiuM)
+library(sf)
+library(spdep)
+```
+
+# SVI Data
+Need to figure out which cols to remove from the neighbors matrix stuff 
+with {spdep}
+## Load Data
+```{r}
+all_data = readr::read_csv(
+  "/Users/Scott/QGIS/SVI/Penn_Analysis/data/final_output.csv",
+  col_types = list(
+    GEOID = col_character()
+  ))
+```
+
+# Remove Wonky Rows
+remove that Lake Erie (the literal lake) tract:
+```{r}
+all_data <- all_data |> filter(!is.na(COUNTY))
+```
+
+## remove empty (Zero pop) tracts
+Removing TL_sum_pop_est zeroes gets rid of NAs in the outcome
+Removing E_TOTPOP zeroes: the covariates are NA for these rows
+b/c ACS says nobody's there:
+`x = all_data |> 
+  filter(E_TOTPOP == 0) |> 
+  select(all_of(covnames)
+`
+SO I'll remove BOTH.
+```{r}
+all_data <- all_data |> filter(E_TOTPOP > 0)
+all_data <- all_data |> filter(TL_sum_pop_est > 0)
+```
+
+## VERY IMPORTANT
+THIS LINES UP WITH THE INLA FILE, PROVIDED THAT IS ALSO SORTED BY GEOID
+```{r}
+all_data <- all_data |> arrange(GEOID)
+```
+
+
+# CAR Setup
+```{r}
+TL_data = st_read("/Users/Scott/QGIS/SVI/Penn_Analysis/data/tl_2022_42_tract/tl_2022_42_tract.shp")
+```
+
+```{r}
+class(TL_data)
+```
+
+```{r}
+non_zero_pop_tracts = all_data$GEOID
+TL_data = TL_data |> 
+  filter(GEOID %in% non_zero_pop_tracts) |> 
+  arrange(GEOID)
+```
+
+## Neighbors Stuff
+```{r}
+TL_nb = poly2nb(TL_data, row.names = TL_data$GEOID)
+```
+
+```{r}
+nb2INLA("INLA_file", TL_nb)
+```
+
+
+# Prep Columns
+## Outcome
+```{r}
+all_data = all_data |> 
+  mutate(
+    WWR_sum_pop_est = tidyr::replace_na(WWR_sum_pop_est, 0),
+    frac_WW_CEISIN = WWR_sum_pop_est / TL_sum_pop_est
+  )
+```
+
+```{r}
+all_data = all_data |> 
+  mutate(
+    WW_pop_OUTCOME = E_TOTPOP * frac_WW_CEISIN
+  )
+```
+
+## County Confounder
+```{r}
+all_data = all_data |> 
+  mutate(COUNTY = as.factor(COUNTY))
+```
+
+```{r}
+levels(all_data$COUNTY)
+```
+
+
+## Rurality Confounder
+Should pop density be based on land area only, or total area (i.e. including water area as well)?
+```{r}
+all_data = all_data |> 
+  mutate(
+    pop_density = E_TOTPOP / ALAND,
+    pop_density_alt = E_TOTPOP / (ALAND + AWATER),
+    )
+```
+
+## Clustering Covariates
+```{r}
+covnames = c(
+    "EP_POV150", 
+    "EP_UNEMP",
+    "EP_NOHSDP",
+    "EP_AGE65",
+    "EP_AGE17",
+    "EP_MINRTY",
+    "EP_HBURD"
+)
+```
+
+Set NA's (are encoded -999) for covariates:
+ref: https://stackoverflow.com/questions/42888008/changing-multiple-column-values-given-a-condition-in-dplyr
+ref: https://stackoverflow.com/questions/67643144/where-is-the-purrr-operator-documented
+```{r}
+all_data = all_data |> 
+  mutate(
+    across(
+      all_of(covnames),
+      ~ if_else(.x == -999, NA, .x)
+    )
+  )
+```
+
+Convert to quartiles
+```{r}
+for (nom in covnames) {
+  qs = quantile(all_data[nom], na.rm = TRUE)
+  all_data = all_data |>
+    rowwise() |> 
+    mutate("{nom}" := if_else(.data[[nom]] == qs[1], 1, sum(.data[[nom]] > qs))) |> 
+    ungroup()
+}
+```
+
+# Select Data
+ID = GEOID,
+outcome = WW_pop_OUTCOME,
+offset (outcomeT) = E_TOTPOP
+confounders = pop_density,
+clustering covariates = covnames
+```{r}
+input_data = all_data |> 
+  select(GEOID, E_TOTPOP, WW_pop_OUTCOME, pop_density, COUNTY, all_of(covnames))
+```
+
+### just to be extra safe or something...
+```{r}
+input_data <- input_data |> arrange(GEOID)
+```
+
+
+# BPR
+```{r}
+car_county_mod = PReMiuM::profRegr(
+  covNames = covnames,
+  fixedEffectsNames = c("pop_density", "COUNTY"),
+  outcome = "WW_pop_OUTCOME",
+  outcomeT = "E_TOTPOP",
+  data = input_data,
+  output = "bpr_output/car_county_mod",
+  nClusInit = 15,  # c.f. Wamsley
+  yModel = "Poisson",
+  xModel = "Discrete",
+  extraYVar = TRUE,  # for NegBinomial
+  includeCAR = TRUE,
+  neighboursFile = "INLA_file"
+)
+```
+
+
+```{r}
+dissimmat_car_county_mod = calcDissimilarityMatrix(car_county_mod)
+```
+
+```{r}
+optimal_clust_car_county_mod = calcOptimalClustering(dissimmat_car_county_mod)
+```
+
+```{r}
+# input_data["cluster_car_county_mod"] = as.factor(optimal_clust_car_county_mod[["clustering"]])
+```
+
+```{r}
+riskProfileObj_car_county_mod <- calcAvgRiskAndProfile(optimal_clust_car_county_mod)
+```
+
+```{r}
+clusterOrderObj_car_county_mod <- plotRiskProfile(riskProfileObj_car_county_mod, "risk_profile_car_county_mod.png")
+```
