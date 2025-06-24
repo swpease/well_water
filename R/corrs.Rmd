@@ -1,0 +1,205 @@
+---
+title: "corrs"
+author: "Scott Pease"
+date: "2025-06-19"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(readr)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(patchwork)
+```
+
+# Load Data
+```{r}
+all_data = readr::read_csv("/Users/Scott/QGIS/SVI/Penn_Analysis/data/final_output.csv")
+```
+
+# Remove Wonky Rows
+remove that Lake Erie (the literal lake) tract:
+```{r}
+all_data <- all_data |> filter(!is.na(COUNTY))
+```
+
+## remove empty (Zero pop) tracts
+Removing TL_sum_pop_est zeroes gets rid of NAs in the outcome
+Removing E_TOTPOP zeroes: the covariates are NA for these rows
+b/c ACS says nobody's there:
+`x = all_data |> 
+  filter(E_TOTPOP == 0) |> 
+  select(all_of(covnames)
+`
+SO I'll remove BOTH.
+```{r}
+all_data <- all_data |> filter(E_TOTPOP > 0)
+all_data <- all_data |> filter(TL_sum_pop_est > 0)
+```
+
+
+# Prep Columns
+## Outcome
+```{r}
+all_data = all_data |> 
+  mutate(
+    WWR_sum_pop_est = tidyr::replace_na(WWR_sum_pop_est, 0),
+    frac_WW_CEISIN = WWR_sum_pop_est / TL_sum_pop_est
+  )
+```
+
+```{r}
+all_data = all_data |> 
+  mutate(
+    WW_pop_OUTCOME = E_TOTPOP * frac_WW_CEISIN
+  )
+```
+
+## Rurality Confounder
+Should pop density be based on land area only, or total area (i.e. including water area as well)?
+```{r}
+all_data = all_data |> 
+  mutate(
+    pop_density = E_TOTPOP / ALAND,
+    pop_density_alt = E_TOTPOP / (ALAND + AWATER),
+    )
+```
+
+## Clustering Covariates
+```{r}
+covnames = c(
+    "EP_POV150", 
+    "EP_UNEMP",
+    "EP_NOHSDP",
+    "EP_AGE65",
+    "EP_AGE17",
+    "EP_MINRTY",
+    "EP_HBURD"
+)
+```
+
+Set NA's (are encoded -999) for covariates:
+ref: https://stackoverflow.com/questions/42888008/changing-multiple-column-values-given-a-condition-in-dplyr
+ref: https://stackoverflow.com/questions/67643144/where-is-the-purrr-operator-documented
+```{r}
+all_data = all_data |> 
+  mutate(
+    across(
+      all_of(covnames),
+      ~ if_else(.x == -999, NA, .x)
+    )
+  )
+```
+
+Convert to quartiles
+```{r}
+for (nom in covnames) {
+  qs = quantile(all_data[nom], na.rm = TRUE)
+  all_data = all_data |>
+    rowwise() |> 
+    mutate("{nom}_quartile" := if_else(.data[[nom]] == qs[1], 1, sum(.data[[nom]] > qs))) |> 
+    ungroup()
+}
+```
+
+# Select Data
+ID = GEOID,
+outcome = WW_pop_OUTCOME,
+offset (outcomeT) = E_TOTPOP
+confounders = pop_density,
+clustering covariates = covnames
+```{r}
+input_data = all_data |> 
+  select(WW_pop_OUTCOME, frac_WW_CEISIN, pop_density, all_of(covnames)) |> 
+  mutate(log_outcome = log(WW_pop_OUTCOME))
+```
+
+# Plots
+```{r}
+cor(tidyr::drop_na(input_data))
+```
+
+```{r}
+for (nom in covnames) {
+  show(input_data |> 
+    ggplot() +
+    geom_point(aes(.data[[nom]], frac_WW_CEISIN)))
+}
+```
+
+```{r}
+plots = list()
+for (nom in covnames) {
+  plots[[nom]] = input_data |> 
+    ggplot() +
+    geom_point(aes(.data[[nom]], frac_WW_CEISIN))
+}
+```
+
+
+
+```{r fig.dim = c(10, 26)}
+plots[[2]] + plots[[3]] + plots[[4]] + plots[[5]] + plots[[6]] + plots[[7]] + plot_layout(ncol = 2)
+```
+
+
+```{r}
+input_data["x"] = exp(input_data["EP_POV150"] / 100)
+```
+
+Does putting in on the outcome scale help at all?
+By which I mean, E(y) = lambda, log(lambda) = Xb, so maybe try exp(X)
+```{r}
+for (nom in covnames) {
+  show(input_data |> 
+    ggplot() +
+    geom_point(aes(exp(.data[[nom]] / 100), frac_WW_CEISIN)))
+}
+```
+
+## What about log(outcome) ~ pred?
+Shouldn't do this, b/c outcome size depends upon census tract pop, which
+AFAIK is independent of these variables.
+```{r}
+for (nom in covnames) {
+  show(input_data |> 
+    ggplot() +
+    geom_point(aes(log(.data[[nom]]), log_outcome)))
+}
+```
+
+
+## Trying various truncations
+```{r}
+for (nom in covnames) {
+  x = input_data |> filter(WW_pop_OUTCOME > 20)
+  show(x |> 
+    ggplot() +
+    geom_point(aes(WW_pop_OUTCOME, .data[[nom]])))
+}
+```
+
+
+
+```{r}
+for (nom in covnames) {
+  x = input_data |> filter(frac_WW_CEISIN > 0.025, frac_WW_CEISIN < 0.975)
+  show(x |> 
+    ggplot() +
+    geom_point(aes(frac_WW_CEISIN, .data[[nom]])))
+}
+```
+
+
+```{r}
+input_data |> 
+    ggplot() +
+    geom_point(aes(log(pop_density), frac_WW_CEISIN))
+```
+
+

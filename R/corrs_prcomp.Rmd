@@ -1,0 +1,142 @@
+---
+title: "corrs"
+author: "Scott Pease"
+date: "2025-06-19"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(readr)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(ggfortify)
+library(ggbiplot)
+```
+
+# Load Data
+```{r}
+all_data = readr::read_csv("/Users/Scott/QGIS/SVI/Penn_Analysis/data/final_output.csv")
+```
+
+# Remove Wonky Rows
+remove that Lake Erie (the literal lake) tract:
+```{r}
+all_data <- all_data |> filter(!is.na(COUNTY))
+```
+
+## remove empty (Zero pop) tracts
+Removing TL_sum_pop_est zeroes gets rid of NAs in the outcome
+Removing E_TOTPOP zeroes: the covariates are NA for these rows
+b/c ACS says nobody's there:
+`x = all_data |> 
+  filter(E_TOTPOP == 0) |> 
+  select(all_of(covnames)
+`
+SO I'll remove BOTH.
+```{r}
+all_data <- all_data |> filter(E_TOTPOP > 0)
+all_data <- all_data |> filter(TL_sum_pop_est > 0)
+```
+
+
+# Prep Columns
+## Outcome
+```{r}
+all_data = all_data |> 
+  mutate(
+    WWR_sum_pop_est = tidyr::replace_na(WWR_sum_pop_est, 0),
+    frac_WW_CEISIN = WWR_sum_pop_est / TL_sum_pop_est
+  )
+```
+
+```{r}
+all_data = all_data |> 
+  mutate(
+    WW_pop_OUTCOME = E_TOTPOP * frac_WW_CEISIN
+  )
+```
+
+## Rurality Confounder
+```{r}
+all_data = all_data |> 
+  mutate(
+    pop_density = E_TOTPOP / ALAND,
+    )
+```
+
+## Clustering Covariates
+```{r}
+covnames = c(
+    "EP_POV150", 
+    "EP_UNEMP",
+    "EP_NOHSDP",
+    "EP_AGE65",
+    "EP_AGE17",
+    "EP_MINRTY",
+    "EP_HBURD"
+)
+```
+
+Set NA's (are encoded -999) for covariates:
+ref: https://stackoverflow.com/questions/42888008/changing-multiple-column-values-given-a-condition-in-dplyr
+ref: https://stackoverflow.com/questions/67643144/where-is-the-purrr-operator-documented
+```{r}
+all_data = all_data |> 
+  mutate(
+    across(
+      all_of(covnames),
+      ~ if_else(.x == -999, NA, .x)
+    )
+  )
+```
+
+# Select Data
+ID = GEOID,
+outcome = WW_pop_OUTCOME,
+offset (outcomeT) = E_TOTPOP
+confounders = pop_density,
+clustering covariates = covnames
+```{r}
+input_data = all_data |> 
+  select(frac_WW_CEISIN, pop_density, all_of(covnames)) |> 
+  tidyr::drop_na()
+```
+
+# prcomp
+```{r}
+mod = prcomp(input_data[,3:9], scale. = TRUE)
+```
+
+```{r}
+screeplot(mod, type = "lines")
+```
+
+
+```{r}
+autoplot(mod, data = input_data, color = "frac_WW_CEISIN", loadings = TRUE, loadings.label = TRUE)
+```
+
+```{r}
+mod_w_popdens = prcomp(input_data[,2:9], scale. = TRUE)
+```
+
+```{r}
+autoplot(mod_w_popdens, data = input_data, color = "frac_WW_CEISIN", loadings = TRUE, loadings.label = TRUE, )
+```
+
+```{r}
+biplot(mod, scale = 0)
+biplot(mod, scale = 1)
+biplot(mod, scale = 1, pc.biplot = TRUE)
+biplot(mod, scale = 1, pc.biplot = TRUE, )
+```
+
+```{r}
+ggbiplot::ggbiplot(mod, varname.color = "red", )
+```
+
